@@ -12,31 +12,50 @@ class PhysicsVals:
 	pass
 
 
-M = 20 # y cell count == number of rows
-N = 20 # x cell count == number of columns
+M = 32 # y cell count == number of rows
+N = 16 # x cell count == number of columns
 
 width = [.2 for i in range(N)] #width of each column at each mesh x index
-height = [.1 + (i-5)**2/500 for i in range(M)]
+height = [.3 for i in range(M)]
 
 mesh = [[PhysicsVals() for i in range(N)] for j in range(M)]
 
-# for a fixed source boundary, assign a number; assing 0 for vacuum
-leftBoundary = 'reflecting'
-rightBoundary = 2
+def integral(arr):
+	result = [0]
+	for x in arr:
+		result.append(result[-1] + x)
+	return result
+
+xVals = integral(width)
+yVals = integral(height)
+
+xCellCenters = [(xVals[i]+xVals[i+1])/2 for i in range(N)]
+yCellCenters = [(yVals[i]+yVals[i+1])/2 for i in range(M)]
+
+
+#for a fixed source boundary, assign a number; assing 0 for vacuum
+#for reflecting, assign 'reflecting'
+#periodic not implemented
+#other boundary conditions not implemented
+leftBoundary = 0
+rightBoundary = 'reflecting'
 topBoundary = 0
 bottomBoundary = 'reflecting'
-#implementing periodic boundaries would require a 7-banded matrix
+#implementing periodic boundaries would require a 9-banded matrix
 #so don't do anything that's too specific to 5-banded stuff
 #TODO verify that periodic boundaries are paired
-
 
 for x_index in range(N):
 	for y_index in range(M):
 		
 		c = mesh[y_index][x_index]
 		
-		c.D, c.Sigma_a, c.S, = 1, 0.2, x_index/N
+		c.S = 1
 		
+		if (xCellCenters[x_index] - 1)**2 + (yCellCenters[y_index] - 4)**2 < 1.5**2:
+			c.D, c.Sigma_a = .5, 0.05
+		else:
+			c.D, c.Sigma_a = .2, 0.05
 		
 	
 
@@ -58,12 +77,15 @@ def avgSigma(i, j):
 	Sigma_a will end up being half as large on the edges, which makes sense
 	for a vacumm boundary,
 	but with a reflected boundary there's the same Sigma_a on the other side
-	so average Sigma_a shouldn't be cut in half
+	so average Sigma_a shouldn't be cut in half?
 	k = min(max(0, k), M-1)
 	to count local values as values across reflecting boundary
 	
 	
 	ask Prof. Slaybaugh about this
+	
+	the implementation below seems to give the right answer and the alternative
+	above gives the wrong answer
 	'''
 	
 	result = 0
@@ -97,6 +119,24 @@ def avgSource(i, j):
 	averages values of source from cells adjacent to vertex (i, j)
 	"""
 	
+	#at ambiguous corners, use the average of the source term from each surface
+	
+	edgeConditions = []
+	
+	if i == 0 and isNumeric(leftBoundary):
+		edgeConditions.append(leftBoundary)
+	if i == N and isNumeric(rightBoundary):
+		edgeConditions.append(rightBoundary)
+	if j == 0 and isNumeric(bottomBoundary):
+		edgeConditions.append(bottomBoundary)
+	if j == M and isNumeric(topBoundary):
+		edgeConditions.append(topBoundary)
+	
+	if len(edgeConditions) > 0:
+		return sum(edgeConditions) / len(edgeConditions)
+	
+	#if we're not at a fixed source edge, sum over the adjacent cells
+	
 	result = 0
 	
 	for k in [i-1, i]:
@@ -107,15 +147,6 @@ def avgSource(i, j):
 				l %= M
 			if k >= 0 and k < N and l >= 0 and l < M:
 				result += mesh[l][k].S * width[k]*height[l]/4
-	
-	if i == 0 and isNumeric(leftBoundary):
-		result = leftBoundary
-	if i == N and isNumeric(rightBoundary):
-		result = rightBoundary
-	if j == 0 and isNumeric(bottomBoundary):
-		result = bottomBoundary
-	if j == M and isNumeric(topBoundary):
-		result = topBoundary
 	
 	return result
 	
@@ -133,6 +164,15 @@ def matrixElement(i, j, direction):
 	i = i-1
 	j = j-1
 	
+	if i == -1 and isNumeric(leftBoundary):
+		return 0
+	if i_next == N and isNumeric(rightBoundary):
+		return 0
+	if j == -1 and isNumeric(bottomBoundary):
+		return 0
+	if j_next == M and isNumeric(topBoundary):
+		return 0
+	
 	if i == -1:
 		if leftBoundary == 'periodic':
 			i = N-1 # wrap around to the right edge (negative list indexing in python would have had the same effect)
@@ -141,8 +181,6 @@ def matrixElement(i, j, direction):
 				return -(mesh[j][i_next].D*width[i_next]) / (2*height[j])
 			if (direction == TOP):
 				return -(mesh[j_next][i_next].D*width[i_next]) / (2*height[j_next])
-		else: # fixed source at edge, so this point has no effect
-			return 0
 	
 	if j == -1:
 		if bottomBoundary == 'periodic':
@@ -152,8 +190,6 @@ def matrixElement(i, j, direction):
 				return -(mesh[j_next][i].D*height[j_next]) / (2*width[i])
 			if (direction == RIGHT):
 				return -(mesh[j_next][i_next].D*height[j_next]) / (2*width[i_next])
-		else:
-			return 0
 	
 	if i_next == N:
 		if rightBoundary == 'periodic':
@@ -163,8 +199,6 @@ def matrixElement(i, j, direction):
 				return -(mesh[j][i].D*width[i]) / (2*height[j])
 			if (direction == TOP):
 				return -(mesh[j_next][i].D*width[i]) / (2*height[j_next])
-		else: # fixed source at edge, so this point has no effect
-			return 0
 	
 	if j_next == M:
 		if topBoundary == 'periodic':
@@ -174,8 +208,6 @@ def matrixElement(i, j, direction):
 				return -(mesh[j][i].D*height[j]) / (2*width[i])
 			if (direction == RIGHT):
 				return -(mesh[j][i_next].D*height[j]) / (2*width[i_next])
-		else:
-			return 0
 	
 	
 	#copied from lecture notes
@@ -223,6 +255,7 @@ diagonals[BOTTOM] += [0] * (N+1)
 #places rows at these indices relative to the main diagonal
 offsets = [-(N+1), -1, 0, 1, N+1]
 
+#TODO add diagonals for periodic boundaries (or TODON't)
 
 mat = dia_matrix((np.matrix(diagonals), offsets), shape=((M+1)*(N+1), (M+1)*(N+1)))
 
@@ -247,8 +280,8 @@ with open('out.txt', 'a') as out:
 	
 	print('new run of diffusion solver\n', file=out)
 	
-	print('columns:', M, file=out)
-	print('rows:', N, file=out)
+	print('rows:', M, file=out)
+	print('columns:', N, file=out)
 	
 	print('\n', file=out)
 	
@@ -257,13 +290,13 @@ with open('out.txt', 'a') as out:
 	print('\n', file=out)
 	
 	print('cell heights', file=out)
-	print('\n'.join(str(val) for val in height), file=out)
+	print('\n'.join(str(val) for val in reversed(height)), file=out)
 	print('\n', file=out)
 	
 	#print all given physics values
 	for key in mesh[0][0].__dict__:
 		print(key, file=out)
-		for row in reversed(mesh): #prints such that y = 0 is on the bottom
+		for row in reversed(mesh): #reversed so that it prints such that y = 0 is on the bottom
 			print(', '.join(str(val.__dict__[key]) for val in row), file=out)
 			
 		print('\n\n', file=out)
@@ -293,11 +326,34 @@ with open('out.txt', 'a') as out:
 
 import matplotlib.pyplot as plt
 
-def integral(arr):
-	result = [arr[0]]
-	for x in arr[1:]:
-		result.append(result[-1] + x)
-	return result
-
-plt.pcolormesh(integral(width), integral(height), cellAvgFlux)
+plt.pcolormesh(xVals, yVals, cellAvgFlux)
 plt.show()
+
+"""
+from math import cosh, sqrt
+
+def fixedExact(x):
+	return 8/0.2*(1 - cosh(sqrt(0.2/1)*x) / cosh(sqrt(0.2/1)*4))
+
+
+fluxAnalytical = [[fixedExact(x-4) for x in xVals] for y in yVals]
+
+cellAvgFluxAnalytical = [[sum(fluxAnalytical[l][k] for k in [i, i+1] for l in [j, j+1])/4 for i in range(N)] for j in range(M)]
+
+
+plt.pcolormesh(xVals, yVals, cellAvgFluxAnalytical)
+plt.show()
+
+diff = [[cellAvgFlux[j][i]-cellAvgFluxAnalytical[j][i] for i in range(N)] for j in range(M)]
+
+with open('out.txt', 'a') as out:
+	print('analytical cell averaged flux', file=out)
+	for row in reversed(cellAvgFluxAnalytical):
+		print(', '.join(str(val) for val in row), file=out)
+	
+	print('\n\n', file=out)
+	
+	print('diff', file=out)
+	for row in reversed(diff):
+		print(', '.join(str(val) for val in row), file=out)
+"""
